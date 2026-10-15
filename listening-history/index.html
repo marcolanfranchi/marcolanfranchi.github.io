@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Listening History</title>
+    <script>
+        /* apply the saved sidebar state before first paint; with no saved choice, phones start collapsed */
+        (function () {
+            var saved = null;
+            try { saved = localStorage.getItem('nav-collapsed'); } catch (e) {}
+            if (saved === '1' || (saved === null && window.matchMedia && window.matchMedia('(max-width: 768px)').matches))
+                document.documentElement.classList.add('nav-collapsed');
+        })();
+    </script>
+    <link rel="stylesheet" href="../static/css/style.css">
+
+</head>
+<body class="listening_history">
+    <nav class="navbar" id="site-nav">
+        <button type="button" class="nav-toggle" aria-controls="site-nav-links" aria-label="Hide menu" aria-expanded="true"></button>
+        <div class="nav-container" id="site-nav-links">
+            <a href="/" class="nav-link">Home</a>
+            
+            <ul class="nav-menu">
+                    <li class="nav-link dropdown">
+                    <a href="#" class="nav-link">Misc.</a>
+                    <div class="dropdown-content">
+                        <a href="index.html">Listening</a>
+                        <a href="../concert-history/index.html">Concerts</a>
+                        <a href="../photos/index.html">Photos</a>
+                    </div>
+                </li>
+            </ul>
+            
+        </div>
+    </nav>
+
+    <main class="main-content">
+        
+<div class="hero-content lh-hero">
+  <!-- a tiny Winamp-style spectrum analyzer (static if the visitor prefers reduced motion) -->
+  <div class="eq" aria-hidden="true"><div class="eq-screen"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+  <h1 class="hero-title">Listening History</h1>
+  <p class="hero-description">
+    A log of my Spotify listening history that I'm storing in an SQLite db
+    (<a href="https://github.com/marcolanfranchi/spotify-history">project</a>).
+    <span class="data-updated" id="data-updated"></span>.
+  </p>
+</div>
+
+<!-- TIME FRAME: sticky, so the selected period is always visible -->
+<div class="lh-bar-sentinel" id="lh-bar-sentinel"></div>
+<div class="lh-bar" id="lh-bar" role="toolbar" aria-label="Time frame">
+  <div class="tr-toggle" role="group">
+    <button type="button" class="tr-opt tr-opt-active" id="tab-all" onclick="setMode('all')">all time</button>
+    <span class="tr-sep" aria-hidden="true">/</span>
+    <button type="button" class="tr-opt" id="tab-week" onclick="setMode('week')">weekly</button>
+  </div>
+  <div class="tr-nav" id="tr-nav" style="display:none;">
+    <button type="button" class="tr-arrow" id="tr-prev" onclick="shiftWeek(-1)" aria-label="Previous week">&#8592;</button>
+    <span class="tr-label" id="tr-label"></span>
+    <button type="button" class="tr-arrow" id="tr-next" onclick="shiftWeek(1)" aria-label="Next week">&#8594;</button>
+  </div>
+  <span class="tr-badge" id="tr-badge">all time</span>
+</div>
+
+<div class="lh">
+
+  <!-- STATS -->
+  <section class="lh-sec lh-span">
+    <header class="lh-h"><h2>Stats</h2><span class="section-period" id="stats-period"></span></header>
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-v" id="stat-hours">–</div><div class="kpi-l">hours listened</div></div>
+      <div class="kpi"><div class="kpi-v" id="stat-plays">–</div><div class="kpi-l">total plays</div></div>
+      <div class="kpi"><div class="kpi-v" id="stat-avg">–</div><div class="kpi-l">avg daily plays</div></div>
+      <div class="kpi"><div class="kpi-v" id="stat-tracks">–</div><div class="kpi-l">unique tracks</div></div>
+      <div class="kpi"><div class="kpi-v" id="stat-artists">–</div><div class="kpi-l">unique artists</div></div>
+      <div class="kpi"><div class="kpi-v" id="stat-days">–</div><div class="kpi-l">days active</div></div>
+    </div>
+  </section>
+
+  <!-- TOP ARTISTS + TOP TRACKS -->
+  <section class="lh-sec lh-half">
+    <header class="lh-h"><h2>Top Artists</h2></header>
+    <div id="top-artists"></div>
+    <div class="list-pager" id="artists-pager" hidden></div>
+  </section>
+  <section class="lh-sec lh-half">
+    <header class="lh-h"><h2>Top Tracks</h2><span class="lh-hint">click to play</span></header>
+    <div id="top-tracks"></div>
+    <div class="list-pager" id="tracks-pager" hidden></div>
+  </section>
+
+  <!-- TOP ALBUMS -->
+  <section class="lh-sec lh-span">
+    <header class="lh-h"><h2>Top Albums</h2><span class="section-period" id="albums-period"></span></header>
+    <div id="top-albums"></div>
+    <div class="list-pager" id="albums-pager" hidden></div>
+  </section>
+
+  <!-- DAILY PLAYS -->
+  <section class="lh-sec lh-main lh-pair lh-heatmap">
+    <header class="lh-h"><h2>Daily Plays</h2><span class="section-period">last 35 weeks</span></header>
+    <div class="hm-scroll" id="hm-scroll">
+      <div class="hm-inner">
+        <span></span>
+        <div class="activity-months"></div>
+        <div class="activity-days-labels"><span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span></div>
+        <div id="activity-chart"></div>
+      </div>
+    </div>
+    <div class="activity-legend">
+      <span>less</span><i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span>more</span>
+    </div>
+  </section>
+
+  <!-- PLAYS OVER TIME -->
+  <section class="lh-sec lh-side lh-pair">
+    <header class="lh-h"><h2>Plays Over Time</h2><span class="section-period" id="time-period"></span></header>
+    <div id="over-time"></div>
+    <p class="lh-note" id="time-note"></p>
+  </section>
+
+  <!-- LISTENING LOG -->
+  <section class="lh-sec lh-main lh-log listening-main">
+    <header class="lh-h"><h2>Listening Log</h2><span class="section-period" id="log-period"></span></header>
+    <div class="log-tools">
+      <input type="search" id="log-search" class="log-search" placeholder="Search tracks, artists, albums" aria-label="Search the listening log" oninput="onLogSearchInput()" />
+      <span class="log-count" id="log-count"></span>
+      <div class="log-pager" id="log-pager-top" hidden></div>
+    </div>
+    <div id="music-container"><p class="no-data">Loading…</p></div>
+    <div class="log-pager log-pager-bottom" id="log-pager-bottom" hidden></div>
+  </section>
+
+  <aside class="lh-side lh-aside">
+
+    <!-- TOP GENRES -->
+    <section class="lh-sec">
+      <header class="lh-h"><h2>Top Genres</h2><span class="section-period" id="genres-period"></span></header>
+      <p class="lh-note">Share of plays; an artist can have several genres.</p>
+      <div id="top-genres"></div>
+    <div class="list-pager" id="genres-pager" hidden></div>
+    </section>
+
+    <!-- ARTIST OF THE MONTH (of the day in weekly mode): each period's #1 artist as a little polaroid -->
+    <section class="lh-sec">
+      <header class="lh-h"><h2 id="tops-title">Artist of the Month</h2><span class="section-period" id="tops-period"></span></header>
+      <div class="pola-grid" id="period-tops"></div>
+      <p class="lh-note lh-note-after" id="tops-note"></p>
+    </section>
+
+    <!-- ARTIST SHARE: every artist as a tile sized by plays (treemap) -->
+    <section class="lh-sec">
+      <header class="lh-h"><h2>Artist Share</h2><span class="section-period" id="share-period"></span></header>
+      <div id="artist-share"></div>
+      <p class="lh-note lh-note-after" id="share-note"></p>
+    </section>
+
+    <!-- WHEN I LISTEN -->
+    <section class="lh-sec">
+      <header class="lh-h"><h2>When I Listen</h2><span class="section-period" id="when-period"></span></header>
+      <p class="lh-sub" id="when-subtitle">Plays by hour of day</p>
+      <div class="hour-chart" id="hour-chart" role="img"></div>
+      <div class="hour-axis" id="hour-axis"></div>
+      <p class="lh-note" id="when-note"></p>
+    </section>
+
+  </aside>
+</div>
+
+<!-- LISTEN: a dock that appears once a track is clicked -->
+<div class="player-dock section-player" id="player-section" hidden>
+  <div class="player-inner">
+    <div class="player-top">
+      <span class="player-label">Listen</span>
+      <button type="button" class="player-close" id="gp-close" aria-label="Close player">&times;</button>
+    </div>
+    <div class="player-now" id="player-now" style="display:none;">
+      <span class="player-now-name" id="player-now-name">–</span>
+      <span class="player-now-artist" id="player-now-artist"></span>
+    </div>
+    <div class="player-idle" id="player-idle">click any track to listen</div>
+    <div class="player-controls-row">
+      <button type="button" class="gp-btn" id="gp-playpause" aria-label="Play/Pause">
+        <svg id="gp-icon-play" width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg>
+        <svg id="gp-icon-pause" width="10" height="10" viewBox="0 0 12 12" fill="currentColor" style="display:none"><rect x="2" y="1" width="3" height="10"/><rect x="7" y="1" width="3" height="10"/></svg>
+      </button>
+      <div class="gp-progress-wrapper">
+        <div class="gp-progress-bg" id="gp-progress-bg">
+          <div class="gp-progress-fill" id="gp-progress-fill"></div>
+        </div>
+      </div>
+      <span class="gp-time" id="gp-time">0:00 / 0:00</span>
+    </div>
+    <div id="gp-fallback-container"></div>
+  </div>
+</div>
+
+
+<script>
+const DATA_URL = "https://marco-personal-site.s3.us-east-2.amazonaws.com/spotify-history/v1/";
+/* TODO: remove the plays.csv fallback (CSV_URL, getPlaysFromCSV, every `dataSource === 'csv'` branch)
+   once the v1 JSON is confirmed working in production. */
+const CSV_URL = "https://marco-personal-site.s3.us-east-2.amazonaws.com/spotify-history/plays.csv";
+
+/* ── state ── */
+let allPlays = [];
+let dataSource = 'json';  // 'json' | 'csv' (legacy fallback: no ids, durations or metadata)
+let manifest = null;
+let viewMode = 'all';
+let weekOffset = 0;
+let currentFilteredPlays = [];
+let minDataDate = null;   // earliest play date, set after load
+let minWeekOffset = 0;    // how far back the data goes in weeks
+
+/* ── global player ── */
+let gpAudio = null, gpTrackId = null, gpRafId = null;
+
+function trunc(str, n) {
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
+}
+/* names go into innerHTML and title="" attributes, and many contain & ' " < > */
+const ESC = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ESC[c]); }
+/* small square image linked to Spotify; an empty box keeps rows aligned when an artist has no image */
+function thumb(src, url, kind) {
+  const img = src ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : '';
+  return url && src
+    ? `<a class="thumb thumb-${kind}" href="${url}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">${img}</a>`
+    : `<span class="thumb thumb-${kind}">${img}</span>`;
+}
+
+function formatTime(s) {
+  return `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`;
+}
+function updateGPProgress() {
+  if (!gpAudio) return;
+  const pct = gpAudio.duration ? (gpAudio.currentTime / gpAudio.duration) * 100 : 0;
+  document.getElementById('gp-progress-fill').style.width = pct + '%';
+  document.getElementById('gp-time').textContent = formatTime(gpAudio.currentTime) + ' / ' + formatTime(gpAudio.duration || 0);
+  gpRafId = requestAnimationFrame(updateGPProgress);
+}
+function setGPIcons(playing) {
+  document.getElementById('gp-icon-play').style.display  = playing ? 'none' : 'inline';
+  document.getElementById('gp-icon-pause').style.display = playing ? 'inline' : 'none';
+  document.getElementById('player-section').classList.toggle('playing', playing);
+  /* mark active row with ▶ only — no background highlight */
+  document.querySelectorAll('.weekly-track').forEach(el =>
+    el.classList.toggle('active-track', el.dataset.trackId === gpTrackId));
+}
+async function playTrack(trackId, trackName, artistName) {
+  /* show the dock + track label once a track is chosen */
+  document.getElementById('player-section').hidden = false;
+  document.getElementById('player-idle').style.display = 'none';
+  document.getElementById('player-now').style.display = '';
+  document.getElementById('player-now-name').textContent = trunc(trackName, 38);
+  document.getElementById('player-now-artist').textContent = trunc(artistName, 38);
+
+  if (gpTrackId === trackId && gpAudio) {
+    if (gpAudio.paused) { gpAudio.play(); setGPIcons(true); gpRafId = requestAnimationFrame(updateGPProgress); }
+    else { gpAudio.pause(); setGPIcons(false); cancelAnimationFrame(gpRafId); }
+    return;
+  } 
+  if (gpAudio) { gpAudio.pause(); cancelAnimationFrame(gpRafId); }
+  gpTrackId = trackId;
+  setGPIcons(false); // update ▶ marker immediately on new track
+  let previewUrl = null;
+  try {
+    const r = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    if (r.ok) { const h = await r.text(); const m = h.match(/"preview_url"\s*:\s*"([^"]+)"/); if (m) previewUrl = m[1].replace(/\\/g,''); }
+  } catch(_) {}
+  const fb = document.getElementById('gp-fallback-container');
+  fb.innerHTML = '';
+  document.querySelector('.player-controls-row').style.display = '';
+  /* Spotify's embed shows its own title/artist, so the dock hides its label in that mode */
+  document.getElementById('player-section').classList.toggle('is-embed', !previewUrl);
+  if (previewUrl) {
+    gpAudio = new Audio(previewUrl);
+    gpAudio.volume = 0.8;
+    gpAudio.play().catch(()=>{});
+    setGPIcons(true);
+    document.getElementById('gp-progress-fill').style.width = '0%';
+    document.getElementById('gp-time').textContent = '0:00 / 0:00';
+    gpRafId = requestAnimationFrame(updateGPProgress);
+    gpAudio.addEventListener('ended', () => { setGPIcons(false); cancelAnimationFrame(gpRafId); });
+  } else {
+    gpAudio = null;
+    document.querySelector('.player-controls-row').style.display = 'none';
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://open.spotify.com/embed/track/${trackId}`;
+    iframe.width = '100%'; iframe.height = '80'; iframe.frameBorder = '0';
+    iframe.allow = 'encrypted-media';
+    iframe.style.cssText = 'display:block;border:none;margin-top:0.1rem;';
+    fb.appendChild(iframe);
+    setGPIcons(false);
+  }
+}
+document.getElementById('gp-playpause').addEventListener('click', () => {
+  if (!gpTrackId || !gpAudio) return;
+  if (gpAudio.paused) { gpAudio.play(); setGPIcons(true); gpRafId = requestAnimationFrame(updateGPProgress); }
+  else { gpAudio.pause(); setGPIcons(false); cancelAnimationFrame(gpRafId); }
+});
+document.getElementById('gp-close').addEventListener('click', () => {
+  if (gpAudio) { gpAudio.pause(); gpAudio = null; }
+  cancelAnimationFrame(gpRafId);
+  document.getElementById('gp-fallback-container').innerHTML = '';
+  gpTrackId = null;
+  setGPIcons(false);
+  document.getElementById('player-section').hidden = true;
+});
+document.getElementById('gp-progress-bg').addEventListener('click', (e) => {
+  if (!gpAudio || !gpAudio.duration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  gpAudio.currentTime = ((e.clientX - rect.left) / rect.width) * gpAudio.duration;
+});
+
+/* ── data: v1 JSON tables, joined once into one denormalized array ── */
+async function fetchJSON(name) {
+  const r = await fetch(DATA_URL + name + '.json');
+  if (!r.ok) throw new Error(`${name}.json: HTTP ${r.status}`);
+  return r.json();
+}
+/* precomputed per-play fields used by filtering, the log and the time charts */
+function decoratePlay(p) {
+  const d = new Date(p.played_at);
+  p._t = d.getTime();
+  p._day = getLocalDateKey(p.played_at);
+  p._hour = d.getHours();
+  p._q = (p.track_name + '\u0001' + p.artist_name + '\u0001' + (p.album_name || '')).toLowerCase();
+  return p;
+}
+/* release_date may be "2012", "2012-09" or "2012-09-27" */
+function releaseYear(s) {
+  const year = s ? parseInt(s.slice(0, 4), 10) : NaN;
+  return Number.isFinite(year) ? year : null;
+}
+async function getPlaysFromJSON() {
+  const [plays, tracks, artists, albums] = await Promise.all(['plays', 'tracks', 'artists', 'albums'].map(fetchJSON));
+  const T  = new Map(tracks.map(t => [t.id, t]));
+  const A  = new Map(artists.map(a => [a.id, a]));
+  const AL = new Map(albums.map(a => [a.id, a]));
+  const out = [];
+  for (const p of plays) {
+    if (!p.played_at) continue;
+    const t = T.get(p.track_id);
+    const artistId = p.artist_id || t?.artist_ids?.[0] || null;
+    const a = A.get(artistId);
+    const albumId = p.album_id || t?.album_id || null;
+    const al = AL.get(albumId);
+    out.push(decoratePlay({
+      played_at: p.played_at,
+      track_id: p.track_id,
+      track_name: t?.name || 'Unknown Track',
+      artist_id: artistId,
+      artist_name: a?.name || 'Unknown Artist',
+      artist_image: a?.image_url || null,
+      album_id: albumId,
+      album_name: al?.name || 'Unknown Album',
+      album_image: al?.image_url || null,
+      duration_ms: t?.duration_ms ?? null,
+      explicit: t?.explicit ?? null,
+      context_type: p.context_type ?? null,
+      genres: a?.genres_known ? (a.genres || []) : null,  // null = not enriched yet (new artist), [] = unclassified by Spotify
+      release_date: al?.release_date || null,
+      release_year: releaseYear(al?.release_date),
+    }));
+  }
+  /* the export is newest first; only sort if that ever stops being true */
+  for (let i = 1; i < out.length; i++) {
+    if (out[i]._t > out[i - 1]._t) { out.sort((x, y) => y._t - x._t); break; }
+  }
+  return out;
+}
+async function loadData() {
+  const manifestReq = fetchJSON('manifest').catch(() => null);
+  try {
+    allPlays = await getPlaysFromJSON();
+    dataSource = 'json';
+    manifest = await manifestReq;
+  } catch (e) {
+    console.warn('v1 JSON unavailable, falling back to plays.csv:', e);
+    allPlays = await getPlaysFromCSV();
+    dataSource = 'csv';
+  }
+}
+function renderUpdated() {
+  const el = document.getElementById('data-updated');
+  const at = manifest?.generated_at ? new Date(manifest.generated_at) : null;
+  if (!at || isNaN(at)) { el.textContent = ''; return; }
+  const mins = Math.max(0, Math.round((Date.now() - at.getTime()) / 60000));
+  const ago = mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : fmtFull(at);
+  el.textContent = `Updated ${ago}`;
+  el.title = at.toLocaleString();
+}
+/* stable key for "the same artist": id when we have one, name for legacy CSV rows */
+function artistKey(p) { return p.artist_id || p.artist_name; }
+
+/* ── legacy CSV (fallback only, see TODO above) ── */
+function parseCSVLine(line) {
+  const result = []; let current = ''; let inQuotes = false;
+  for (let char of line) {
+    if (char === '"') inQuotes = !inQuotes;
+    else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+    else current += char;
+  }
+  result.push(current.trim());
+  return result;
+}
+async function getPlaysFromCSV() {
+  const res = await fetch(CSV_URL);
+  if (!res.ok) throw new Error(`plays.csv: HTTP ${res.status}`);
+  const text = await res.text();
+  return text.trim().split('\n').slice(1)
+    .map(line => { const p = parseCSVLine(line); return { played_at:p[0], track_id:p[1], track_name:p[2]||'Unknown Track', artist_name:p[3]||'Unknown Artist',
+      artist_id:null, artist_image:null, album_id:null, album_name:null, album_image:null, duration_ms:null, explicit:null,
+      context_type:null, genres:null, release_date:null, release_year:null }; })
+    .filter(p => p.played_at && !isNaN(Date.parse(p.played_at)))
+    .map(decoratePlay)
+    .sort((a,b) => b._t - a._t);
+}
+
+/* ── util ── */
+function getLocalDateKey(utc) {
+  const d = new Date(utc);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function formatPlayTime(utc) {
+  return new Date(utc).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:false });
+}
+function formatDate(dateStr) {
+  return new Date(dateStr).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+}
+
+/* ── week helpers ── */
+function getWeekBounds(offset) {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7) + offset * 7);
+  monday.setHours(0,0,0,0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23,59,59,999);
+  return { start: monday, end: sunday };
+}
+function fmtShort(d) { return d.toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
+function fmtFull(d)  { return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); }
+function getFilteredPlays() {
+  if (viewMode === 'all') return allPlays;
+  const { start, end } = getWeekBounds(weekOffset);
+  const s = start.getTime(), e = end.getTime();
+  return allPlays.filter(p => p._t >= s && p._t <= e);
+}
+
+/* compute how many weeks back data starts, so we can clamp the arrow */
+function computeMinWeekOffset() {
+  if (!allPlays.length) return 0;
+  const earliest = new Date(allPlays[allPlays.length - 1].played_at);
+  const now = new Date();
+  const nowMonday = new Date(now);
+  nowMonday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  nowMonday.setHours(0,0,0,0);
+  const earliestMonday = new Date(earliest);
+  earliestMonday.setDate(earliest.getDate() - ((earliest.getDay() + 6) % 7));
+  earliestMonday.setHours(0,0,0,0);
+  const diffMs = nowMonday.getTime() - earliestMonday.getTime();
+  return -Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+}
+
+/* ── mode / nav ── */
+function setMode(mode) {
+  viewMode = mode;
+  weekOffset = 0;
+  document.getElementById('tab-all').classList.toggle('tr-opt-active', mode === 'all');
+  document.getElementById('tab-week').classList.toggle('tr-opt-active', mode === 'week');
+  document.getElementById('tr-nav').style.display = mode === 'week' ? 'flex' : 'none';
+  refreshAll();
+}
+function shiftWeek(delta) {
+  const next = weekOffset + delta;
+  if (next > 0) return;
+  if (next < minWeekOffset) return;
+  weekOffset = next;
+  refreshAll();
+}
+function refreshAll() {
+  const plays = getFilteredPlays();
+  currentFilteredPlays = plays;
+
+  if (viewMode === 'week') {
+    const { start, end } = getWeekBounds(weekOffset);
+    document.getElementById('tr-label').textContent = fmtShort(start) + ' – ' + fmtShort(end);
+    document.getElementById('tr-next').disabled = weekOffset >= 0;
+    document.getElementById('tr-prev').disabled = weekOffset <= minWeekOffset;
+  }
+
+  let periodText = viewMode === 'all' ? 'all time' : (() => { const {start,end}=getWeekBounds(weekOffset); return fmtFull(start)+' – '+fmtFull(end); })();
+  /* in all-time mode the badge shows the actual span of the data rather than repeating the toggle */
+  document.getElementById('tr-badge').textContent = viewMode === 'all' && allPlays.length
+    ? fmtFull(new Date(allPlays[allPlays.length - 1]._t)) + ' – ' + fmtFull(new Date(allPlays[0]._t))
+    : periodText;
+  for (const id of ['stats-period', 'albums-period', 'log-period', 'when-period', 'genres-period', 'share-period', 'time-period', 'tops-period'])
+    document.getElementById(id).textContent = periodText;
+
+  renderStats(plays);
+  renderTopCharts(plays);
+  renderTopAlbums(plays);
+  renderLog(plays, '');
+  renderWhen(plays);
+  renderGenres(plays);
+  renderArtistShare(plays);
+  renderPeriodTops(plays);
+  renderOverTime(plays);
+  const s = document.getElementById('log-search');
+  if (s) s.value = '';
+}
+
+/* ── stats ── */
+function renderStats(plays) {
+  const dayCount = Math.max(new Set(plays.map(p => p._day)).size, 1);
+  /* real durations; any play without one (legacy CSV, unknown track) falls back to the old 3.5 min estimate */
+  let ms = 0, estimated = 0;
+  for (const p of plays) { if (p.duration_ms) ms += p.duration_ms; else { ms += 210000; estimated++; } }
+  const hoursEl = document.getElementById('stat-hours');
+  hoursEl.textContent = (ms / 3600000).toFixed(1) + (estimated ? ' est.' : '');
+  hoursEl.title = estimated ? `${estimated.toLocaleString()} plays without a known duration are estimated at 3.5 min` : 'sum of track durations';
+  document.getElementById('stat-plays').textContent   = plays.length.toLocaleString();
+  document.getElementById('stat-avg').textContent     = Math.round(plays.length / dayCount);
+  document.getElementById('stat-tracks').textContent  = new Set(plays.map(p=>p.track_id)).size.toLocaleString();
+  document.getElementById('stat-artists').textContent = new Set(plays.map(artistKey)).size.toLocaleString();
+  document.getElementById('stat-days').textContent    = dayCount.toLocaleString();
+}
+
+/* ── paged "Top X" lists ──
+   Each list keeps its full ranking (top 100) and draws one page at a time; ranks continue across pages
+   and bars stay scaled to #1. A new period (refreshAll) rebuilds the lists, so they start on page 1. */
+const TOP_N = 100;
+const lists = {};  // key → { items, per, page, render(pageItems, startIndex) }
+function setList(key, items, per, render) {
+  lists[key] = { items, per, page: 0, render };
+  drawList(key);
+}
+function drawList(key) {
+  const L = lists[key], pages = Math.max(1, Math.ceil(L.items.length / L.per));
+  L.page = Math.min(Math.max(L.page, 0), pages - 1);
+  const start = L.page * L.per;
+  L.render(L.items.slice(start, start + L.per), start);
+  const pager = document.getElementById(key + '-pager');
+  pager.hidden = pages <= 1;
+  pager.innerHTML = pages > 1
+    ? `<button type="button" class="tr-arrow tr-first" data-list="${key}" data-step="first" aria-label="First page" title="First page"${L.page === 0 ? ' disabled' : ''}>&#8676;</button><button type="button" class="tr-arrow" data-list="${key}" data-step="-1" aria-label="Previous page"${L.page === 0 ? ' disabled' : ''}>&#8592;</button><span class="tr-label">${L.page + 1} / ${pages}</span><button type="button" class="tr-arrow" data-list="${key}" data-step="1" aria-label="Next page"${L.page >= pages - 1 ? ' disabled' : ''}>&#8594;</button>`
+    : '';
+}
+function initListPagers() {
+  /* one listener for every list pager */
+  document.querySelector('.lh').addEventListener('click', e => {
+    const b = e.target.closest('[data-list]');
+    if (!b || b.disabled) return;
+    const L = lists[b.dataset.list];
+    L.page = b.dataset.step === 'first' ? 0 : L.page + +b.dataset.step;
+    drawList(b.dataset.list);
+  });
+  /* top tracks: one delegated listener for click-to-play */
+  document.getElementById('top-tracks').addEventListener('click', e => {
+    const row = e.target.closest('[data-i]');
+    const t = row && lists.tracks?.items[+row.dataset.i];
+    if (t) playTrack(t.track_id, t.track_name, t.artist_name);
+  });
+}
+function markActiveTrack() {
+  if (!gpTrackId) return;
+  document.querySelectorAll('.weekly-track').forEach(el =>
+    el.classList.toggle('active-track', el.dataset.trackId === gpTrackId));
+}
+
+/* ── top charts ── */
+function renderTopCharts(plays) {
+  const artistMap = new Map();
+  plays.forEach(p => {
+    const k = artistKey(p);
+    let a = artistMap.get(k);
+    if (!a) artistMap.set(k, a = { id: p.artist_id, name: p.artist_name, image: p.artist_image, count: 0 });
+    a.count++;
+  });
+  const topArtists = [...artistMap.values()].sort((a, b) => b.count - a.count).slice(0, TOP_N);
+  const maxA = topArtists[0]?.count || 1;
+
+  const trackMap = {};
+  plays.forEach(p => { if (!trackMap[p.track_id]) trackMap[p.track_id] = { ...p, count: 0 }; trackMap[p.track_id].count++; });
+  const topTracks = Object.values(trackMap).sort((a, b) => b.count - a.count).slice(0, TOP_N);
+  const maxT = topTracks[0]?.count || 1;
+
+  /* artist names and images link back to Spotify (required for Spotify artist metadata/images) */
+  setList('artists', topArtists, 10, (page, start) => {
+    const el = document.getElementById('top-artists');
+    if (!page.length) { el.innerHTML = NO_PLAYS; return; }
+    const anyArtistImage = page.some(a => a.image);
+    el.innerHTML = page.map((a, j) => {
+      const url = a.id ? `https://open.spotify.com/artist/${encodeURIComponent(a.id)}` : null;
+      const name = url ? `<a class="sp-link" href="${url}" target="_blank" rel="noopener">${esc(trunc(a.name, 40))}</a>` : esc(trunc(a.name, 40));
+      return `<div class="alltime-row"><span class="alltime-rank">${start + j + 1}</span>${anyArtistImage ? thumb(a.image, url, 'artist') : ''}<div class="alltime-info"><div class="alltime-name-row"><span class="alltime-name" title="${esc(a.name)}">${name}</span><span class="alltime-count">${a.count.toLocaleString()}</span></div><div class="alltime-bar-bg"><div class="alltime-bar-fill" style="width:${(a.count / maxA * 100).toFixed(1)}%"></div></div></div></div>`;
+    }).join('');
+  });
+
+  setList('tracks', topTracks, 10, (page, start) => {
+    const el = document.getElementById('top-tracks');
+    if (!page.length) { el.innerHTML = NO_PLAYS; return; }
+    el.innerHTML = page.map((t, j) => {
+      const combined = t.track_name + ' — ' + t.artist_name;
+      return `<div class="alltime-row alltime-row-clickable weekly-track" data-i="${start + j}" data-track-id="${esc(t.track_id)}"><span class="alltime-rank">${start + j + 1}</span><div class="alltime-info"><div class="alltime-name-row"><span class="alltime-name" title="${esc(combined)}">${esc(trunc(t.track_name, 40))} <span class="alltime-artist">— ${esc(trunc(t.artist_name, 28))}</span></span><span class="alltime-count">${t.count.toLocaleString()}</span></div><div class="alltime-bar-bg"><div class="alltime-bar-fill" style="width:${(t.count / maxT * 100).toFixed(1)}%"></div></div></div></div>`;
+    }).join('');
+    markActiveTrack();
+  });
+}
+
+/* ── log (paginated) ──
+   The log is split into pages of whole days (~LOG_PAGE_TARGET plays; a day is never split, so a
+   single big day can be its own longer page). Only the current page is in the DOM, and all clicks
+   go through one delegated listener on #music-container. */
+const LOG_PAGE_TARGET = 100;
+let log = { plays: [], days: [], pages: [], page: 0, search: '', open: new Set(), seen: new Set() };
+
+function renderLog(plays, searchTerm) {
+  const q = (searchTerm || '').trim().toLowerCase();
+  const filtered = q ? plays.filter(p => p._q.includes(q)) : plays;
+
+  /* plays are newest first, so each local day is one contiguous run */
+  const days = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const d = days[days.length - 1];
+    if (d && d.key === filtered[i]._day) d.end = i + 1;
+    else days.push({ key: filtered[i]._day, start: i, end: i + 1 });
+  }
+  const pages = [];
+  let cur = null;
+  for (let k = 0; k < days.length; k++) {
+    const n = days[k].end - days[k].start;
+    if (!cur || (cur.plays > 0 && cur.plays + n > LOG_PAGE_TARGET)) pages.push(cur = { from: k, to: k, plays: 0 });
+    cur.to = k + 1; cur.plays += n;
+  }
+  log = { plays: filtered, days, pages, page: 0, search: (searchTerm || '').trim(), open: new Set(), seen: new Set() };
+
+  document.getElementById('log-count').textContent = filtered.length.toLocaleString() + ' plays';
+  renderLogPage();
+}
+
+function renderLogPage() {
+  const container = document.getElementById('music-container');
+  const { plays, days, pages, search } = log;
+  renderLogPager();
+  if (!plays.length) {
+    container.innerHTML = `<div class="no-data">${search ? 'No results for "' + esc(search) + '".' : 'No plays in this period.'}</div>`;
+    return;
+  }
+  const pg = pages[log.page];
+  /* first day of a page starts expanded the first time the page is shown; during search every day is */
+  if (!log.seen.has(log.page)) { log.seen.add(log.page); log.open.add(days[pg.from].key); }
+
+  let html = '', lastMonth = null;
+  for (let k = pg.from; k < pg.to; k++) {
+    const d = days[k], first = plays[d.start], n = d.end - d.start;
+    const monthLabel = new Date(first._t).toLocaleDateString('en-US', { month:'long', year:'numeric' });
+    if (monthLabel !== lastMonth) { lastMonth = monthLabel; html += `<div class="music-month-separator">${monthLabel}</div>`; }
+    const open = !!search || log.open.has(d.key);
+    html += `<div class="music-day"><h3 class="music-day-header" data-day="${d.key}"><span class="collapse-arrow">${open?'▼':'▶'}</span> ${formatDate(first.played_at)}<span class="dot-bar" style="animation-delay:-${((k * 1.37) % 4.5).toFixed(2)}s">${'•'.repeat(Math.min(n, 40))}</span><span class="play-count">(${n})</span></h3><div class="music-artists"${open ? '' : ' hidden'}>`;
+    for (let i = d.start; i < d.end; i++) {
+      const p = plays[i];
+      html += `<div class="music-artist music-artist-clickable weekly-track${p.track_id === gpTrackId ? ' active-track' : ''}" data-i="${i}" data-track-id="${esc(p.track_id)}"><span class="artist-count">${formatPlayTime(p.played_at)}</span><span class="artist-name"><span class="lg-track">${esc(p.track_name)}</span><span class="lg-artist">${esc(p.artist_name)}</span></span></div>`;
+    }
+    html += '</div></div>';
+  }
+  container.innerHTML = html;
+}
+
+function renderLogPager() {
+  const n = log.pages.length;
+  const html = n > 1
+    ? `<button class="tr-arrow tr-first" data-page="first" aria-label="First page" title="First page"${log.page === 0 ? ' disabled' : ''}>&#8676;</button><button class="tr-arrow" data-page="-1" aria-label="Newer"${log.page === 0 ? ' disabled' : ''}>&#8592;</button><span class="tr-label">page ${log.page + 1} of ${n}</span><button class="tr-arrow" data-page="1" aria-label="Older"${log.page >= n - 1 ? ' disabled' : ''}>&#8594;</button>`
+    : '';
+  for (const id of ['log-pager-top', 'log-pager-bottom']) {
+    const el = document.getElementById(id);
+    el.innerHTML = html;
+    el.hidden = n <= 1;
+  }
+}
+
+function setLogPage(delta, fromBottom) {
+  const next = log.page + delta;
+  if (next < 0 || next >= log.pages.length) return;
+  log.page = next;
+  renderLogPage();
+  if (fromBottom) document.querySelector('.listening-main').scrollIntoView({ block: 'start' });
+}
+
+function initLogEvents() {
+  document.getElementById('music-container').addEventListener('click', e => {
+    const header = e.target.closest('.music-day-header');
+    if (header) {
+      const list = header.nextElementSibling, key = header.dataset.day;
+      list.hidden = !list.hidden;
+      if (list.hidden) log.open.delete(key); else log.open.add(key);
+      header.querySelector('.collapse-arrow').textContent = list.hidden ? '▶' : '▼';
+      return;
+    }
+    const row = e.target.closest('[data-i]');
+    if (row) { const p = log.plays[+row.dataset.i]; if (p) playTrack(p.track_id, p.track_name, p.artist_name); }
+  });
+  for (const id of ['log-pager-top', 'log-pager-bottom']) {
+    document.getElementById(id).addEventListener('click', e => {
+      const b = e.target.closest('[data-page]');
+      if (b && !b.disabled) setLogPage(b.dataset.page === 'first' ? -log.page : +b.dataset.page, id === 'log-pager-bottom');
+    });
+  }
+}
+
+/* search always runs over every play in the selected period, then paginates the matches */
+function filterLog() {
+  renderLog(currentFilteredPlays, document.getElementById('log-search').value);
+}
+let logSearchTimer = null;
+function onLogSearchInput() {
+  clearTimeout(logSearchTimer);
+  logSearchTimer = setTimeout(filterLog, 150);
+}
+
+/* ── shared helpers for the newer sections ── */
+const NO_PLAYS = '<div class="no-data">No plays in this period.</div>';
+const LEGACY_NOTE = 'Not available right now (loaded from the legacy CSV).';
+function pctStr(x) { return x === 0 ? '0%' : x < 0.0005 ? '<0.1%' : x >= 0.995 ? '100%' : x >= 0.1 ? Math.round(x * 100) + '%' : (x * 100).toFixed(1) + '%'; }
+function playsLabel(c) { return `${c.toLocaleString()} play${c === 1 ? '' : 's'}`; }
+/* one ranked row in the existing alltime-row style; `label` is already-escaped HTML */
+function barRow(rank, label, title, badge, frac, extra = '') {
+  return `<div class="alltime-row"><span class="alltime-rank">${rank}</span>${extra}<div class="alltime-info"><div class="alltime-name-row"><span class="alltime-name" title="${esc(title)}">${label}</span><span class="alltime-count">${badge}</span></div><div class="alltime-bar-bg"><div class="alltime-bar-fill" style="width:${(frac * 100).toFixed(1)}%"></div></div></div></div>`;
+}
+
+/* ── when I listen: hour of day, in the viewer's local time ── */
+function renderWhen(plays) {
+  const hourEl = document.getElementById('hour-chart');
+  const noteEl = document.getElementById('when-note'), axisEl = document.getElementById('hour-axis');
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const city = tz ? tz.split('/').pop().replace(/_/g, ' ') : '';  // "America/Vancouver" → "Vancouver"
+  document.getElementById('when-subtitle').textContent = `Plays by hour of day${city ? ' (' + city + ' time)' : ''}`;
+  if (!plays.length) { axisEl.innerHTML = noteEl.textContent = ''; hourEl.innerHTML = NO_PLAYS; return; }
+
+  const hours = new Array(24).fill(0);
+  for (const p of plays) hours[p._hour]++;
+  const n = plays.length, maxH = Math.max(...hours), hh = h => String(h % 24).padStart(2, '0') + ':00';
+  hourEl.innerHTML = hours.map((c, h) =>
+    `<div class="hour-col" data-tip="${hh(h)}–${hh(h + 1)} · ${playsLabel(c)} (${pctStr(c / n)})"><div class="hour-fill" style="height:${(c / maxH * 100).toFixed(1)}%"></div></div>`).join('');
+  axisEl.innerHTML = hours.map((_, h) => `<span>${h % 6 === 0 ? String(h).padStart(2, '0') : ''}</span>`).join('');
+  const peak = hours.indexOf(maxH), quiet = hours.indexOf(Math.min(...hours));
+  noteEl.textContent = `busiest ${hh(peak)}–${hh(peak + 1)} · quietest ${hh(quiet)}–${hh(quiet + 1)}`;
+  hourEl.setAttribute('aria-label', 'Plays by hour of day; ' + noteEl.textContent);
+}
+
+/* ── top albums ── */
+function renderTopAlbums(plays) {
+  const el = document.getElementById('top-albums');
+  if (dataSource === 'csv') { setList('albums', [], 10, () => { el.className = ''; el.innerHTML = `<div class="no-data">${LEGACY_NOTE}</div>`; }); return; }
+  /* Spotify often has several album ids for one release (reissues, regional/explicit editions),
+     so group by name + main artist and link to the id with the most plays */
+  const m = new Map();
+  for (const p of plays) {
+    if (!p.album_id) continue;
+    const key = p.album_name.toLowerCase() + '\u0001' + artistKey(p);
+    let a = m.get(key);
+    if (!a) m.set(key, a = { name: p.album_name, artist: p.artist_name, count: 0, ids: new Map(), image: null });
+    a.count++;
+    a.ids.set(p.album_id, (a.ids.get(p.album_id) || 0) + 1);
+    if (!a.image && p.album_image) a.image = p.album_image;
+  }
+  const top = [...m.values()].sort((a, b) => b.count - a.count).slice(0, TOP_N);
+  for (const a of top) a.id = [...a.ids].sort((x, y) => y[1] - x[1])[0][0];
+  const max = top[0]?.count || 1;
+
+  setList('albums', top, 10, (page, start) => {
+    if (!page.length) { el.className = ''; el.innerHTML = NO_PLAYS; return; }
+    const covers = page.filter(a => a.image).length, anyImage = covers > 0;
+    /* album names and covers link back to Spotify */
+    if (covers >= Math.min(6, page.length)) {
+      /* enough covers for a wall; the odd missing one becomes a typographic cover */
+      el.className = 'album-grid';
+      el.innerHTML = page.map((a, j) => {
+        const url = `https://open.spotify.com/album/${encodeURIComponent(a.id)}`;
+        const cover = a.image
+          ? `<img src="${esc(a.image)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
+          : `<span class="album-cover-text">${esc(a.name)}</span>`;
+        return `<a class="album-card" href="${url}" target="_blank" rel="noopener" title="${esc(a.name + ' — ' + a.artist)}"><div class="album-cover">${cover}<span class="album-rank">${start + j + 1}</span></div><div class="album-title sp-link">${esc(a.name)}</div><div class="album-meta"><span>${esc(a.artist)}</span><span>${a.count.toLocaleString()}</span></div></a>`;
+      }).join('');
+      return;
+    }
+    el.className = 'album-list';
+    el.innerHTML = page.map((a, j) => {
+      const url = `https://open.spotify.com/album/${encodeURIComponent(a.id)}`;
+      const label = `<a class="sp-link" href="${url}" target="_blank" rel="noopener">${esc(trunc(a.name, 40))}</a> <span class="alltime-artist">— ${esc(trunc(a.artist, 28))}</span>`;
+      return barRow(start + j + 1, label, a.name + ' — ' + a.artist, a.count.toLocaleString(), a.count / max, anyImage ? thumb(a.image, url, 'album') : '');
+    }).join('');
+  });
+}
+
+/* ── top genres: share of the period's plays whose main artist carries each genre.
+   An artist can have several genres, so shares overlap and don't sum to 100%. Artists without genres
+   ([] = unclassified by Spotify, null = not enriched yet) just don't count toward any. ── */
+function renderGenres(plays) {
+  const el = document.getElementById('top-genres');
+  const counts = new Map();
+  if (dataSource !== 'csv') for (const p of plays) if (p.genres) for (const g of p.genres) counts.set(g, (counts.get(g) || 0) + 1);
+  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, TOP_N);
+  const n = plays.length, max = top[0]?.[1] || 1;
+  setList('genres', top, 10, (page, start) => {
+    if (dataSource === 'csv') { el.innerHTML = `<div class="no-data">${LEGACY_NOTE}</div>`; return; }
+    if (!plays.length) { el.innerHTML = NO_PLAYS; return; }
+    if (!page.length) { el.innerHTML = '<div class="no-data">No genres for this period.</div>'; return; }
+    el.innerHTML = page.map(([g, c], j) => barRow(start + j + 1, esc(g), `${g}: ${c.toLocaleString()} of ${n.toLocaleString()} plays`, pctStr(c / n), c / max)).join('');
+  });
+}
+
+/* ── artist share: every artist in the period as a tile sized by plays (squarified treemap) ──
+   The top 8 get distinct colours (a validated categorical palette, muted to suit the page) and are labelled
+   when their tile is big enough; the long tail shades from mid to pale gray by rank. Every tile has a tooltip. */
+const SHARE_COLORS = ['#3a6fb0', '#d0643a', '#2c9a72', '#d39a1c', '#cf7a9c', '#2f7d32', '#5a4a9c', '#c4473f'];
+const TM_W = 400, TM_H = 300;  // layout units; tiles are placed in % so the map scales with its box
+function shareColor(i, n) {
+  if (i < SHARE_COLORS.length) return SHARE_COLORS[i];
+  /* tail: gray from #b4bac0 (rank 9) to #e8ebee (last), on a log scale so the gradient spreads evenly */
+  const t = n > 9 ? Math.log(i - 7) / Math.log(n - 7) : 0;
+  const c = Math.round(180 + t * (232 - 180));
+  return `rgb(${c},${c + 5},${c + 10})`;
+}
+function inkFor(hex) {
+  /* dark or white label text, whichever reads better on the tile */
+  const [r, g, b] = [1, 3, 5].map(k => parseInt(hex.slice(k, k + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 ? '#202122' : '#fff';
+}
+/* squarified treemap (Bruls, Huizing & van Wijk): items sorted by value, descending */
+function squarify(values, W, H) {
+  const total = values.reduce((a, b) => a + b, 0), scale = W * H / total;
+  const out = new Array(values.length);
+  let x = 0, y = 0, w = W, h = H, i = 0, row = [], rowSum = 0, rowMin = Infinity, rowMax = 0;
+  const worst = (sum, mn, mx, len) => Math.max(len * len * mx / (sum * sum), (sum * sum) / (len * len * mn));
+  const layout = () => {
+    if (w >= h) {  // a column on the left
+      const cw = rowSum / h; let yy = y;
+      for (const k of row) { const kh = values[k] * scale / cw; out[k] = { x, y: yy, w: cw, h: kh }; yy += kh; }
+      x += cw; w -= cw;
+    } else {       // a row along the top
+      const rh = rowSum / w; let xx = x;
+      for (const k of row) { const kw = values[k] * scale / rh; out[k] = { x: xx, y, w: kw, h: rh }; xx += kw; }
+      y += rh; h -= rh;
+    }
+    row = []; rowSum = 0; rowMin = Infinity; rowMax = 0;
+  };
+  while (i < values.length) {
+    const a = values[i] * scale, len = Math.min(w, h);
+    if (!row.length || worst(rowSum + a, Math.min(rowMin, a), Math.max(rowMax, a), len) <= worst(rowSum, rowMin, rowMax, len)) {
+      row.push(i); rowSum += a; rowMin = Math.min(rowMin, a); rowMax = Math.max(rowMax, a); i++;
+    } else layout();
+  }
+  if (row.length) layout();
+  return out;
+}
+/* fit a tile label to the tile's real size: wrap at spaces if every word fits, else one line with "…";
+   drop the percentage if the tile is too short for it (the tooltip always has it) */
+let tmCtx;
+function tmMeasure(text) {
+  if (tmCtx === undefined) {
+    try { tmCtx = document.createElement('canvas').getContext('2d'); } catch (e) { tmCtx = null; }
+    if (tmCtx) tmCtx.font = `${0.62 * 16}px sans-serif`;
+  }
+  return tmCtx ? tmCtx.measureText(text).width : text.length * 5.6;  // rough average glyph width without canvas
+}
+function tmLabel(name, wPx, hPx) {
+  const avail = wPx - 10, LINE = 12;
+  if (avail < 24 || hPx < LINE + 6) return null;
+  const fitsOneLine = tmMeasure(name) <= avail;
+  const wordsFit = name.split(/\s+/).every(wd => tmMeasure(wd) <= avail);
+  const lines = fitsOneLine ? 1 : (wordsFit && hPx >= 2 * LINE + 6) ? 2 : 1;
+  /* a one-line label that would show fewer than 5 characters says nothing; leave it to the tooltip */
+  if (!fitsOneLine && lines === 1 && tmMeasure(name.slice(0, 5) + '…') > avail) return null;
+  return { cls: !fitsOneLine && lines === 1 ? 'tm-name tm-name-1' : 'tm-name', showPct: hPx >= (lines + 1) * LINE + 6 };
+}
+function renderArtistShare(plays) {
+  const el = document.getElementById('artist-share'), note = document.getElementById('share-note');
+  if (!plays.length) { el.innerHTML = NO_PLAYS; note.textContent = ''; return; }
+  const m = new Map();
+  for (const p of plays) {
+    const k = artistKey(p);
+    const a = m.get(k);
+    if (a) a.count++; else m.set(k, { name: p.artist_name, count: 1 });
+  }
+  const n = plays.length;
+  const all = [...m.values()].sort((a, b) => b.count - a.count);
+  const rects = squarify(all.map(a => a.count), TM_W, TM_H);
+  const pct = v => (v * 100).toFixed(3) + '%';
+  const boxW = el.clientWidth || 300, boxH = boxW * TM_H / TM_W;
+  el.innerHTML = `<div class="tm" role="img" aria-label="${all.length} artists by share of plays">${all.map((a, i) => {
+    const r = rects[i], bg = shareColor(i, all.length);
+    const fit = i < SHARE_COLORS.length + 4 ? tmLabel(a.name, r.w / TM_W * boxW, r.h / TM_H * boxH) : null;
+    const label = fit
+      ? `<span class="tm-label" style="color:${i < SHARE_COLORS.length ? inkFor(bg) : '#202122'}"><span class="${fit.cls}">${esc(a.name)}</span>${fit.showPct ? `<b>${pctStr(a.count / n)}</b>` : ''}</span>` : '';
+    return `<div class="tm-tile" style="left:${pct(r.x / TM_W)};top:${pct(r.y / TM_H)};width:${pct(r.w / TM_W)};height:${pct(r.h / TM_H)};background:${bg}" data-tip="#${i + 1} ${esc(a.name)} · ${playsLabel(a.count)} (${pctStr(a.count / n)})">${label}</div>`;
+  }).join('')}</div>`;
+  const top10 = all.slice(0, 10).reduce((s, a) => s + a.count, 0) / n;
+  note.textContent = `${all.length.toLocaleString()} artists · the top 10 make up ${pctStr(top10)} of plays`;
+}
+
+/* ── artist of the month (all time) / of the day (weekly): each period's #1 artist, newest first,
+   as small tilted polaroids linked to Spotify; the note names whoever topped the most periods ── */
+function renderPeriodTops(plays) {
+  const el = document.getElementById('period-tops'), note = document.getElementById('tops-note');
+  const weekly = viewMode === 'week';
+  document.getElementById('tops-title').textContent = weekly ? 'Artist of the Day' : 'Artist of the Month';
+  if (!plays.length) { el.innerHTML = NO_PLAYS; note.textContent = ''; return; }
+
+  const buckets = new Map();  // period key → { total, artists: Map(artistKey → { name, id, image, count }) }
+  for (const p of plays) {
+    const key = weekly ? p._day : p._day.slice(0, 7);
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { total: 0, artists: new Map() });
+    b.total++;
+    const k = artistKey(p);
+    const a = b.artists.get(k);
+    if (a) a.count++; else b.artists.set(k, { name: p.artist_name, id: p.artist_id, image: p.artist_image, count: 1 });
+  }
+  /* weekly: all seven days (an empty day stays a blank frame); all time: every month with plays, newest first */
+  const keys = weekly
+    ? Array.from({ length: 7 }, (_, i) => { const d = new Date(getWeekBounds(weekOffset).start); d.setDate(d.getDate() + i); return getLocalDateKey(d); }).reverse()
+    : [...buckets.keys()].sort().reverse();
+  const wins = new Map();
+  el.innerHTML = keys.map((key, i) => {
+    const d = weekly ? localMidnight(key) : localMidnight(key + '-01');
+    const caption = weekly ? d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + d.getDate()
+                           : d.toLocaleDateString('en-US', { month: 'short' }) + ' \u2019' + String(d.getFullYear()).slice(2);
+    const tilt = ((i * 37) % 7 - 3) * 0.6;  // a fixed, gentle scrapbook tilt per frame (−1.8° … +1.8°)
+    const b = buckets.get(key);
+    if (!b) return `<div class="pola pola-empty" style="--tilt:${tilt}deg"><div class="pola-img"></div><span class="pola-cap">${caption}</span></div>`;
+    const top = [...b.artists.values()].sort((x, y) => y.count - x.count || x.name.localeCompare(y.name))[0];
+    wins.set(top.name, (wins.get(top.name) || 0) + 1);
+    const full = weekly ? d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const tip = `${full} · ${top.name} · ${playsLabel(top.count)} (${pctStr(top.count / b.total)})`;
+    const img = top.image
+      ? `<img src="${esc(top.image)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
+      : `<span class="pola-name">${esc(top.name)}</span>`;
+    const inner = `<div class="pola-img">${img}</div><span class="pola-cap">${caption}</span>`;
+    return top.id
+      ? `<a class="pola" style="--tilt:${tilt}deg" href="https://open.spotify.com/artist/${encodeURIComponent(top.id)}" target="_blank" rel="noopener" data-tip="${esc(tip)}">${inner}</a>`
+      : `<div class="pola" style="--tilt:${tilt}deg" data-tip="${esc(tip)}">${inner}</div>`;
+  }).join('');
+
+  const periods = keys.filter(k => buckets.has(k)).length, unit = weekly ? 'day' : 'month';
+  const [champ, n] = [...wins].sort((x, y) => y[1] - x[1])[0];
+  note.textContent = n > 1
+    ? `${champ} topped ${n} of ${periods} ${unit}s`
+    : `${periods} ${unit}${periods === 1 ? '' : 's'}, ${wins.size} different #1${wins.size === 1 ? '' : 's'}`;
+}
+
+/* ── plays over time: plays per week (all time) or per day (a selected week), as a small area chart ── */
+const DAY_MS = 86400000;
+function localMidnight(dayKey) { const [y, m, d] = dayKey.split('-').map(Number); return new Date(y, m - 1, d); }
+function mondayOf(date) { const d = new Date(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(0, 0, 0, 0); return d; }
+function renderOverTime(plays) {
+  const el = document.getElementById('over-time'), note = document.getElementById('time-note');
+  if (!plays.length) { el.innerHTML = NO_PLAYS; note.textContent = ''; return; }
+
+  const byDay = new Map();
+  for (const p of plays) byDay.set(p._day, (byDay.get(p._day) || 0) + 1);
+  const pts = [];  // { label, tip, count }
+  if (viewMode === 'week') {
+    const { start } = getWeekBounds(weekOffset);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const c = byDay.get(getLocalDateKey(d)) || 0;
+      pts.push({ label: d.toLocaleDateString('en-US', { weekday: 'short' }), tip: `${fmtShort(d)} · ${c.toLocaleString()} plays`, count: c });
+    }
+  } else {
+    /* weekly buckets from the first play's week to this week; stepping with setDate keeps DST honest */
+    const byWeek = new Map();
+    for (const [day, c] of byDay) { const k = getLocalDateKey(mondayOf(localMidnight(day))); byWeek.set(k, (byWeek.get(k) || 0) + c); }
+    /* the current week is still in progress, so it's left out rather than drawn as a sudden drop */
+    const first = mondayOf(new Date(plays[plays.length - 1]._t));
+    let last = mondayOf(new Date(plays[0]._t));
+    if (last.getTime() === mondayOf(new Date()).getTime() && last > first) last.setDate(last.getDate() - 7);
+    for (const d = new Date(first); d <= last; d.setDate(d.getDate() + 7)) {
+      const c = byWeek.get(getLocalDateKey(d)) || 0;
+      pts.push({ label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).replace(' ', " '"), tip: `Week of ${fmtFull(d)} · ${c.toLocaleString()} plays`, count: c });
+    }
+  }
+
+  const max = Math.max(...pts.map(p => p.count), 1), W = 300, H = 80, k = pts.length;
+  const x = i => k === 1 ? W / 2 : i / (k - 1) * W;
+  const y = c => H - c / max * (H - 4);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.count).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(k - 1).toFixed(1)} ${H} L${x(0).toFixed(1)} ${H} Z`;
+  const peak = pts.reduce((b, p, i) => p.count > pts[b].count ? i : b, 0);
+  /* each label sits exactly under its point (ends pinned to the edges) */
+  const tickIdx = viewMode === 'week' ? pts.map((_, i) => i) : [...new Set([0, Math.floor((k - 1) / 2), k - 1])];
+  const ticks = tickIdx.map(i => {
+    const pos = x(i) / W * 100, shift = i === 0 && k > 1 ? '0' : i === k - 1 && k > 1 ? '-100%' : '-50%';
+    return `<span style="left:${pos.toFixed(2)}%;transform:translateX(${shift})">${pts[i].label}</span>`;
+  }).join('');
+
+  el.innerHTML = `<div class="ot-chart" role="img" aria-label="Plays over time; peak ${esc(pts[peak].tip)}">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${area}" fill="#9be9a8" fill-opacity="0.45"/>
+        <path d="${line}" fill="none" stroke="#202122" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+      </svg>
+      <span class="ot-peak" style="left:${(x(peak) / W * 100).toFixed(2)}%;top:${(y(pts[peak].count) / H * 100).toFixed(2)}%"></span>
+      <div class="ot-hits">${pts.map(p => `<div data-tip="${esc(p.tip)}"></div>`).join('')}</div>
+    </div>
+    <div class="ot-axis">${ticks}</div>`;
+  note.textContent = `peak: ${pts[peak].tip.replace(/^Week of /, 'week of ')}`;
+}
+
+/* hover tooltips for the hour chart and heatmap (one delegated listener each) */
+function initChartTips() {
+  const tip = document.createElement('div');
+  tip.className = 'activity-tooltip';
+  document.body.appendChild(tip);
+  for (const id of ['hour-chart', 'activity-chart', 'over-time', 'artist-share', 'period-tops']) {
+    const el = document.getElementById(id);
+    el.addEventListener('mousemove', e => {
+      const c = e.target.closest('[data-tip]');
+      if (!c) { tip.style.display = 'none'; return; }
+      tip.textContent = c.dataset.tip;
+      tip.style.display = 'block';
+      tip.style.left = `${e.pageX}px`;
+      tip.style.top = `${e.pageY - 36}px`;
+    });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  }
+}
+
+/* ── heatmap ── */
+function renderActivityChart(plays) {
+  const chartContainer = document.getElementById('activity-chart');
+  const monthsContainer = document.querySelector('.activity-months');
+
+  const playsByDay = plays.reduce((acc,play) => {
+    acc[play._day] = (acc[play._day]||0)+1; return acc;
+  }, {});
+
+  const today = new Date();
+  const startDate = new Date(today);
+  startDate.setDate(today.getDate() - (35*7));
+
+  const weeks = [];
+  let currentWeek = [];
+  let currentDate = new Date(startDate);
+  const monthPositions = [];
+  let lastMonth = -1, weekIndex = 0;
+
+  const startDay = currentDate.getDay();
+  for (let i = 0; i < startDay; i++) currentWeek.push(null);
+
+  while (currentDate <= today) {
+    const dateKey = getLocalDateKey(currentDate.toISOString());
+    const count = playsByDay[dateKey] || 0;
+    const month = currentDate.getMonth();
+    if (month !== lastMonth && currentDate.getDay() === 0) {
+      monthPositions.push({ month: currentDate.toLocaleDateString('en-US',{month:'short'}), position: weekIndex });
+      lastMonth = month;
+    }
+    currentWeek.push({ date: new Date(currentDate), dateKey, count });
+    if (currentWeek.length === 7) { weeks.push(currentWeek); currentWeek = []; weekIndex++; }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  if (currentWeek.length > 0) {
+    while (currentWeek.length < 7) currentWeek.push(null);
+    weeks.push(currentWeek);
+  }
+
+  /* columns are fluid, so month labels are placed as a share of the grid width */
+  monthsContainer.innerHTML = monthPositions.map(({month, position}) =>
+    `<span class="month-label" style="left:${(position / weeks.length * 100).toFixed(2)}%">${month}</span>`).join('');
+
+  /* one-hue sequential ramp (light → ink), same thresholds as before */
+  const maxCount = Math.max(...Object.values(playsByDay), 1);
+  const level = c => {
+    if (c === 0) return 0;
+    const i = c / maxCount;
+    return i < 0.25 ? 1 : i < 0.5 ? 2 : i < 0.75 ? 3 : 4;
+  };
+
+  let cells = '';
+  for (const week of weeks) {
+    for (const day of week) {
+      if (!day) { cells += '<div class="activity-day empty"></div>'; continue; }
+      const label = day.date.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      cells += `<div class="activity-day l${level(day.count)}" data-tip="${playsLabel(day.count)} on ${label}"></div>`;
+    }
+  }
+  chartContainer.innerHTML = `<div class="activity-grid" style="grid-template-columns:repeat(${weeks.length}, minmax(0, 1fr))">${cells}</div>`;
+
+  /* on narrow screens the grid scrolls; start at the most recent weeks */
+  const scroller = document.getElementById('hm-scroll');
+  scroller.scrollLeft = scroller.scrollWidth;
+}
+
+/* give the time-frame bar a hairline only while it is stuck over scrolled content */
+function initStickyBar() {
+  const sentinel = document.getElementById('lh-bar-sentinel');
+  if (!sentinel || !('IntersectionObserver' in window)) return;
+  new IntersectionObserver(([e]) => document.getElementById('lh-bar').classList.toggle('is-stuck', !e.isIntersecting))
+    .observe(sentinel);
+}
+
+/* ── init ── */
+async function init() {
+  try { await loadData(); }
+  catch (e) {
+    console.error('could not load listening data:', e);
+    document.getElementById('music-container').innerHTML = '<div class="no-data">Couldn\'t load listening data. Try again in a few minutes.</div>';
+    return;
+  }
+  renderUpdated();
+  initLogEvents();
+  initListPagers();
+  initChartTips();
+  initStickyBar();
+  /* treemap labels are fitted to the tiles' pixel size, so refit them when the layout width changes */
+  let tmW = 0, tmTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(tmTimer);
+    tmTimer = setTimeout(() => {
+      const w = document.getElementById('artist-share').clientWidth;
+      if (w && w !== tmW) { tmW = w; renderArtistShare(currentFilteredPlays); }
+    }, 200);
+  });
+  minWeekOffset = computeMinWeekOffset();
+  renderActivityChart(allPlays);
+  refreshAll();
+}
+init();
+</script>
+
+<style>
+/* ── tokens: mostly black & white, same inks as the rest of the site ──
+   Georgia (as on the blog posts) for the big figures and period captions gives it an old-print feel. */
+.main-content {
+  --serif: Georgia, 'Times New Roman', serif;
+  --border: #a2a9b1;   /* the site's Wikipedia-style border gray */
+  --box: #d6dade;      /* softer section borders */
+  --ink: #202122;      /* primary text, rules, data marks */
+  --ink-2: #54595d;    /* secondary text */
+  --ink-3: #72777d;    /* muted text (≥4.5:1 on white) */
+  --ink-4: #a2a9b1;    /* decorative only: ranks, separators */
+  --rule: #eaecf0;     /* hairlines, bar tracks */
+  --wash: #f6f7f8;     /* hover */
+}
+
+/* ── layout: one 10-column grid so rows line up across both sides ── */
+.lh {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  column-gap: 2.25rem;
+  row-gap: 2.4rem;
+  align-items: start;
+}
+/* Daily Plays + When I Listen share a row height; the heatmap sits centred in its box */
+.lh-pair { align-self: stretch; }
+.lh-heatmap { display: flex; flex-direction: column; justify-content: center; }
+.lh-span { grid-column: 1 / -1; }
+.lh-half { grid-column: span 5; }
+.lh-main { grid-column: span 6; }
+.lh-side { grid-column: span 4; }
+.lh-aside { display: flex; flex-direction: column; gap: 2.4rem; min-width: 0; border: 0; padding: 0; }
+
+/* ── sections: soft boxes with the title notched into the top border, like an old ledger form ── */
+.lh-sec {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--box);
+  padding: 1.15rem 0.95rem 0.9rem;
+}
+.lh-h {
+  position: absolute;
+  top: 0;
+  left: 0.6rem;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  pointer-events: none;
+}
+.lh-h > * { background: #fff; padding: 0 0.35rem; pointer-events: auto; }
+.lh-h h2 { flex-shrink: 0; font-size: 0.95rem; line-height: 1.2; font-weight: normal; color: var(--ink); }
+.lh-h .section-period { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.section-period {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.lh-hint { font-family: var(--serif); font-size: 0.72rem; font-style: italic; color: var(--ink-3); white-space: nowrap; }
+.lh-sub, .lh-note {
+  font-size: 0.7rem;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--ink-2);
+  margin: 0 0 0.6rem;
+}
+.no-data { font-size: 0.72rem; color: var(--ink-3); padding: 0.3rem 0; }
+
+
+/* ── sticky time-frame bar ── */
+.lh-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 0;
+  margin: -0.5rem 0 1.75rem;
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.lh-bar.is-stuck { border-bottom-color: var(--border); }
+.tr-toggle { display: inline-flex; align-items: baseline; gap: 0.35rem; }
+.tr-opt {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.tr-opt:hover:not(.tr-opt-active) { color: var(--ink-2); }
+.tr-opt-active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.tr-sep { font-size: 0.82rem; color: var(--ink-4); }
+.tr-nav { display: flex; align-items: center; gap: 0.4rem; }
+.tr-arrow {
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tr-arrow:hover:not(:disabled) { border-bottom-color: var(--ink); }
+.tr-arrow:disabled { opacity: 0.3; cursor: default; }
+.tr-label { font-size: 0.74rem; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.tr-badge { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 0.72rem; color: var(--ink-2); white-space: nowrap; border: 1px solid var(--border); padding: 0.05rem 0.35rem; }
+
+/* ── stats: big numbers ── */
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.kpi { padding: 0.1rem 0.9rem 0.15rem; border-left: 1px solid var(--box); min-width: 0; }
+.kpi:first-child { border-left: 0; padding-left: 0; }
+.kpi-v {
+  font-family: var(--serif);
+  font-size: 1.85rem;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.kpi-l { font-size: 0.66rem; color: var(--ink-2); margin-top: 0.35rem; }
+
+/* ── ranked rows (top artists/tracks, genres, weekdays, decades, repeats) ── */
+.alltime-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.34rem 0; }
+.alltime-row-clickable { cursor: pointer; }
+.alltime-row-clickable:hover { background: linear-gradient(to right, transparent, var(--wash) 1.2rem, var(--wash)); }
+.alltime-rank {
+  position: relative;
+  margin-bottom: 0.45rem;  /* sit on the name's line, not the middle of name + bar */
+  flex-shrink: 0;
+  width: 1.1rem;
+  text-align: right;
+  font-size: 0.64rem;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+.alltime-info { flex: 1; min-width: 0; }
+.alltime-name-row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.alltime-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.alltime-artist { color: var(--ink-3); }
+.alltime-count { flex-shrink: 0; font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.alltime-bar-bg { height: 2px; background: var(--rule); margin-top: 0.32rem; }
+.alltime-bar-fill { height: 2px; background: var(--ink); }
+
+/* playing track: ▶ replaces the rank number */
+.weekly-track.active-track .alltime-rank { color: transparent; }
+.weekly-track.active-track .alltime-rank::after { content: '▶'; position: absolute; right: 0; color: var(--ink); font-size: 0.55rem; top: 0.15rem; }
+
+/* Spotify links + thumbnails: full colour; on hover the photo eases up inside its frame */
+.sp-link { color: inherit; text-decoration: none; }
+.sp-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.thumb { display: block; flex-shrink: 0; width: 34px; height: 34px; background: var(--rule); border: 1px solid var(--border); overflow: hidden; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.35s ease; }
+.alltime-row:hover .thumb img { transform: scale(1.1); }
+/* while artist images are showing, keep Top Tracks rows the same height so the two lists stay in step */
+.lh:has(#top-artists .thumb) #top-tracks .alltime-row { min-height: calc(34px + 0.68rem); }
+
+/* ── top albums: cover wall (or a two-column list until enough covers exist) ── */
+.album-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1.25rem 1rem; }
+.album-card { display: block; min-width: 0; color: inherit; text-decoration: none; }
+.album-cover { position: relative; aspect-ratio: 1; background: var(--rule); border: 1px solid var(--border); overflow: hidden; }
+.album-cover img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s ease; }
+.album-card:hover .album-cover img { transform: scale(1.05); }
+/* the card itself lifts a couple of pixels with a soft shadow */
+.album-cover { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+.album-card:hover .album-cover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(32, 33, 34, 0.14); }
+@media (prefers-reduced-motion: reduce) {
+  .thumb img, .album-cover, .album-cover img { transition: none; }
+  .alltime-row:hover .thumb img, .album-card:hover .album-cover img, .album-card:hover .album-cover { transform: none; }
+}
+.album-cover-text {
+  position: absolute;
+  inset: auto 0.5rem 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  color: var(--ink-2);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+.album-rank {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-width: 1.3rem;
+  padding: 0.1rem 0.3rem;
+  background: #fff;
+  color: var(--ink);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--serif);
+  font-size: 0.7rem;
+  line-height: 1.2;
+  text-align: center;
+}
+.album-title { margin-top: 0.45rem; font-size: 0.74rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album-card:hover .album-title { text-decoration: underline; text-underline-offset: 2px; }
+.album-meta { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.66rem; color: var(--ink-3); }
+.album-meta span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album-meta span:last-child { flex-shrink: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.album-list { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(5, auto); grid-auto-flow: column; column-gap: 2.25rem; }
+
+/* ── daily plays heatmap: fills its column, original green ramp ── */
+.hm-scroll { overflow-x: auto; padding-bottom: 2px; }
+.hm-inner { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr); row-gap: 4px; min-width: 400px; }
+.activity-months { position: relative; height: 0.9rem; }
+.month-label { position: absolute; top: 0; font-size: 0.64rem; color: var(--ink-2); }
+.activity-days-labels { display: grid; grid-template-rows: repeat(7, 1fr); row-gap: 3px; position: sticky; left: 0; z-index: 1; background: #fff; }
+.activity-days-labels span { font-size: 0.6rem; color: var(--ink-2); line-height: 1; align-self: center; }
+.activity-grid { display: grid; grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 3px; }
+.activity-day { aspect-ratio: 1; border: 1px solid var(--border); }
+.activity-day.empty { background: transparent; border-color: transparent; }
+.activity-day:not(.empty):hover { transform: scale(1.2); }
+.l0 { background: #ebedf0; }
+.l1 { background: #9be9a8; }
+.l2 { background: #40c463; }
+.l3 { background: #30a14e; }
+.l4 { background: #216e39; }
+.activity-legend { display: flex; align-items: center; gap: 3px; margin: 0.6rem 0 0 1.7rem; font-size: 0.64rem; color: var(--ink-2); }
+.activity-legend i { display: block; width: 9px; height: 9px; border: 1px solid var(--border); }
+.activity-legend span:first-child { margin-right: 0.25rem; }
+.activity-legend span:last-child { margin-left: 0.25rem; }
+.activity-tooltip {
+  position: absolute;
+  display: none;
+  z-index: 1200;
+  transform: translateX(-50%);
+  pointer-events: none;
+  white-space: nowrap;
+  background: #f8f9fa;
+  color: #202122;
+  border: 1px solid #a2a9b1;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0.45rem;
+}
+
+/* ── when I listen: hour columns ── */
+.hour-chart { display: flex; align-items: flex-end; gap: 2px; height: 84px; border-bottom: 1px solid var(--ink); }
+.hour-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.hour-fill { width: 100%; background: var(--ink); }
+.hour-col:hover .hour-fill { background: var(--ink-2); }
+.hour-axis { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin: 0.25rem 0 0.6rem; font-size: 0.62rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* ── artist share: treemap of every artist ── */
+.tm { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #fff; overflow: hidden; }
+.tm-tile { position: absolute; box-sizing: border-box; border-right: 1px solid #fff; border-bottom: 1px solid #fff; overflow: hidden; cursor: default; }
+.tm-tile:hover { box-shadow: inset 0 0 0 1.5px #202122; z-index: 1; }
+.tm-label { position: absolute; left: 0.3rem; top: 0.22rem; right: 0.25rem; bottom: 0.15rem; font-size: 0.62rem; line-height: 1.2; overflow: hidden; pointer-events: none; }
+/* names wrap onto two lines before truncating, so narrow tiles still read */
+.tm-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tm-name-1 { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.tm-label b { display: block; font-family: var(--serif); font-weight: normal; font-style: italic; font-size: 0.66rem; opacity: 0.85; }
+.lh-note-after { margin: 0.5rem 0 0; }
+
+/* ── artist of the month: tiny tilted polaroids ── */
+.pola-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 0.7rem 0.55rem; padding: 0.15rem 0.1rem 0; }
+.pola {
+  display: block;
+  padding: 3px 3px 0;
+  background: #fff;
+  border: 1px solid var(--box);
+  box-shadow: 0 1px 2px rgba(32, 33, 34, 0.12);
+  color: inherit;
+  text-decoration: none;
+  transform: rotate(var(--tilt, 0deg));
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.pola:hover { transform: rotate(0deg) translateY(-2px) scale(1.06); box-shadow: 0 6px 14px rgba(32, 33, 34, 0.18); position: relative; z-index: 1; }
+.pola-img { aspect-ratio: 1; background: var(--rule); overflow: hidden; position: relative; }
+.pola-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pola-name { position: absolute; inset: 3px; font-size: 0.55rem; line-height: 1.15; color: var(--ink-2); overflow: hidden; }
+.pola-cap { display: block; padding: 0.15rem 0 0.2rem; text-align: center; font-family: var(--serif); font-style: italic; font-size: 0.62rem; color: var(--ink-2); white-space: nowrap; }
+.pola-empty { opacity: 0.45; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .pola { transition: none; } .pola:hover { transform: rotate(var(--tilt, 0deg)); } }
+
+/* ── plays over time: area chart with hover columns ── */
+.ot-chart { position: relative; height: 92px; border-bottom: 1px solid var(--ink); }
+.ot-chart svg { display: block; width: 100%; height: 100%; }
+.ot-peak { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: #fff; border: 1.5px solid #216e39; pointer-events: none; }
+.ot-hits { position: absolute; inset: 0; display: flex; }
+.ot-hits > div { flex: 1; }
+.ot-hits > div:hover { background: rgba(32, 33, 34, 0.05); }
+.ot-axis { position: relative; height: 1rem; margin: 0.25rem 0 0.45rem; font-size: 0.62rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ot-axis span { position: absolute; top: 0; white-space: nowrap; }
+
+/* ── hero: a tiny Winamp-style spectrum analyzer in a Win95-bevelled frame ── */
+.lh-hero { position: relative; padding-right: 78px; }
+.eq {
+  position: absolute;
+  top: 0.45rem;
+  right: 0;
+  width: 62px;
+  height: 32px;
+  padding: 3px;
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #fff #7b7b7b #7b7b7b #fff;
+  box-shadow: 1px 1px 0 #202122;
+}
+.eq-screen {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 100%;
+  padding: 2px;
+  background: #0b0e0b;
+  border: 1px solid;
+  border-color: #7b7b7b #fff #fff #7b7b7b;
+}
+/* each bar shows green → yellow → red by height; the mask cuts it into 2px "pixels" */
+.eq-screen span {
+  flex: 1;
+  height: 30%;
+  background: linear-gradient(to top, #2fd14b 0 58%, #e6d43a 58% 80%, #e8513a 80% 100%) bottom / 100% 20px no-repeat;
+  -webkit-mask: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+  mask: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+  animation: eqBar 1.2s steps(1, end) infinite;
+}
+.eq-screen span:nth-child(3n + 1) { animation-duration: 0.9s; }
+.eq-screen span:nth-child(3n + 2) { animation-duration: 1.35s; animation-delay: -0.4s; }
+.eq-screen span:nth-child(4n)     { animation-duration: 1.05s; animation-delay: -0.7s; }
+.eq-screen span:nth-child(5n)     { animation-name: eqBar2; }
+.eq-screen span:nth-child(1), .eq-screen span:nth-child(2) { animation-name: eqBass; }
+@keyframes eqBar  { 0% { height: 35%; } 20% { height: 70%; } 40% { height: 45%; } 60% { height: 90%; } 80% { height: 25%; } }
+@keyframes eqBar2 { 0% { height: 60%; } 25% { height: 20%; } 50% { height: 75%; } 75% { height: 40%; } }
+@keyframes eqBass { 0% { height: 80%; } 30% { height: 100%; } 55% { height: 65%; } 80% { height: 95%; } }
+@media (prefers-reduced-motion: reduce) {
+  .eq-screen span { animation: none; }
+  .eq-screen span:nth-child(odd) { height: 60%; }
+  .eq-screen span:nth-child(3n) { height: 85%; }
+}
+
+/* ── paged Top lists ── */
+.list-pager { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; margin-top: 0.55rem; }
+.list-pager[hidden] { display: none; }
+.list-pager .tr-label { min-width: 2.6rem; text-align: center; font-size: 0.7rem; color: var(--ink-2); }
+
+/* ── listening log ── */
+.log-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin-bottom: 0.9rem; }
+.log-search {
+  flex: 1 1 180px;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.74rem;
+  color: var(--ink);
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.log-search::placeholder { color: var(--ink-4); }
+.log-search:focus { border-color: var(--ink-2); background: #f8f9fa; }
+.log-count { font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.log-pager { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.log-pager[hidden] { display: none; }
+.log-pager .tr-label { color: var(--ink-2); font-size: 0.7rem; }
+.log-pager-bottom { justify-content: flex-end; margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px solid var(--border); }
+
+.music-month-separator { margin: 1.5rem 0 0.35rem; font-size: 0.88rem; color: var(--ink); }
+.music-month-separator:first-child { margin-top: 0.3rem; }
+.music-month-separator::before { content: '─ '; color: var(--ink-4); }
+.music-day { border-bottom: 1px solid var(--rule); }
+.music-day-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.45rem 0.1rem;
+  font-size: 0.76rem;
+  font-weight: normal;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+}
+.music-day-header:hover { background: var(--wash); }
+.collapse-arrow { flex-shrink: 0; width: 0.7rem; font-size: 0.55rem; color: var(--ink-2); }
+/* one animated element per day (staggered via inline animation-delay) */
+.dot-bar {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  opacity: 0.9;
+  animation: dotGlitch 4.5s infinite;
+}
+@keyframes dotGlitch {
+  0%{opacity:.9}2%{opacity:.6}3%{opacity:.3}3.5%{opacity:.5}4%{opacity:.2}4.5%{opacity:.6}5.5%{opacity:.4}6%{opacity:.7}7%{opacity:.9}100%{opacity:.9}
+}
+.play-count { flex-shrink: 0; font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.music-artists { padding-bottom: 0.4rem; }
+.music-artists[hidden] { display: none; }
+.music-artist {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.26rem 0.25rem 0.26rem 1.25rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.music-artist:hover { background: var(--wash); }
+.artist-count { font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.artist-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.lg-artist { color: var(--ink-3); margin-left: 0.55rem; }
+.music-artist.active-track .lg-track::before { content: '▶ '; font-size: 0.55rem; vertical-align: 0.1em; }
+
+/* ── player dock ── */
+.player-dock {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1100;
+  width: 300px;
+  padding: 0.6rem 0.75rem 0.7rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.07);
+}
+.player-dock[hidden] { display: none; }
+.player-dock.is-embed .player-now { display: none !important; }
+.player-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; }
+.player-label { font-size: 0.8rem; color: var(--ink); }
+.player-close { font: inherit; font-size: 0.95rem; line-height: 1; padding: 0 0.15rem; border: 0; background: none; color: var(--ink-2); cursor: pointer; }
+.player-close:hover { color: var(--ink); }
+.player-idle { font-size: 0.68rem; font-style: italic; color: var(--ink-4); margin-bottom: 0.4rem; }
+.player-now { margin-bottom: 0.45rem; min-width: 0; }
+.player-now-name { display: block; font-size: 0.8rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-now-artist { display: block; font-size: 0.7rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-controls-row { display: flex; align-items: center; gap: 0.55rem; }
+.gp-btn { flex-shrink: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--ink); background: #fff; color: var(--ink); cursor: pointer; }
+.gp-btn:hover { background: var(--ink); color: #fff; }
+.gp-progress-wrapper { flex: 1; min-width: 60px; }
+.gp-progress-bg { position: relative; height: 3px; width: 100%; background: var(--rule); cursor: pointer; }
+.gp-progress-fill { height: 3px; width: 0%; background: var(--ink); transition: width 0.25s linear; }
+.gp-time { flex-shrink: 0; font-size: 0.64rem; font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.player-inner { position: relative; z-index: 1; }
+/* wiggly border while audio is playing */
+.section-player::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 2.5px solid var(--ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+  z-index: 2;
+}
+.section-player.playing::before { opacity: 1; animation: borderWiggle 2s ease-in-out infinite; }
+@keyframes borderWiggle {
+  0%{clip-path:polygon(0% 0%,100% 0%,100% 100%,0% 100%)}
+  10%{clip-path:polygon(0% 1%,99% 0%,100% 99%,1% 100%)}
+  20%{clip-path:polygon(1% 0%,100% 1%,99% 100%,0% 99%)}
+  50%{clip-path:polygon(0% 1%,99% 0%,100% 99%,1% 100%)}
+  70%{clip-path:polygon(0% 0%,100% 0%,100% 100%,0% 100%)}
+  100%{clip-path:polygon(0% 0%,100% 0%,100% 100%,0% 100%)}
+}
+
+/* ── responsive ── */
+@media (max-width: 1100px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 1rem; }
+  .kpi:nth-child(3n + 1) { border-left: 0; padding-left: 0; }
+  .album-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  /* one column: the 10-column grid's gaps alone are wider than a phone's content area */
+  .lh { grid-template-columns: minmax(0, 1fr); }
+  .lh-span, .lh-half, .lh-main, .lh-side { grid-column: 1; }
+}
+@media (max-width: 768px) {
+  .lh { row-gap: 2rem; }
+  .lh-aside { gap: 2rem; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi { border-left: 0; padding-left: 0; }
+  .kpi:nth-child(even) { border-left: 1px solid var(--box); padding-left: 0.75rem; }
+  .kpi-v { font-size: 1.25rem; }
+  .album-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 0.75rem; }
+  .album-list { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
+  .lh-bar { gap: 0.45rem 0.75rem; }
+  .tr-badge { display: none; }
+  .music-artist { grid-template-columns: 2.3rem minmax(0, 1fr); padding-left: 0.6rem; }
+  .lh-hero { padding-right: 60px; }
+  .eq { width: 48px; height: 26px; padding: 2px; top: 0.3rem; }
+  .lh-sec { padding: 1.1rem 0.7rem 0.8rem; }
+  .player-dock { left: calc(var(--nav-current, 110px) + 8px); right: 8px; bottom: 8px; width: auto; }
+}
+</style>
+
+    </main>
+
+    <script src="../static/js/script.js"></script>
+</body>
+</html>
